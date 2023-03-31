@@ -1,0 +1,131 @@
+---
+title: "Prediction_CART_BAGGING"
+output: html_document
+date: "2023-03-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load the required libraries and data 
+
+```{r}
+library(PASWR)
+library(caret)
+library(rpart)
+library(boot)
+library(ROCR)
+data(titanic3)
+```
+
+## Preparing the data 
+```{r}
+
+# Select relevant columns
+dfs <- titanic3[, c("sex", "age", "survived", "pclass", "sibsp", "parch", "fare", "embarked")]
+
+# check for NAs
+anyNA(dfs)
+a <- is.na(dfs)
+colSums(a)
+
+# Remove rows with missing values
+df <- dfs[complete.cases(dfs),]
+
+
+# Convert categorical variables to numeric
+df$embarked <- as.numeric(df$embarked)
+df$pclass <- as.numeric(df$pclass)
+
+```
+
+```{r}
+set.seed(1)
+#parameters
+n = 10
+B = 10
+LPMAUC <- numeric(n)
+CARTAUC <- numeric(n)
+BAGGINGAUC <- numeric(n)
+
+```
+
+
+```{r}
+# Run the loop for CART, Bagging, and LPM models
+for (i in 1:n) {
+  set.seed(i * 10)
+  ind <- sample(1:nrow(df), nrow(df), replace = TRUE)
+  train <- df[ind, ]
+  test <- df[-ind, ]
+  
+  #cart
+  model_cart <- rpart(survived ~ ., data = train, method = "class")
+  yhat_cart <- predict(model_cart, test, type = "prob")
+  
+  CARTAUC[i] <- performance(prediction(yhat_cart[,2], test$survived), "auc")@y.values[[1]]
+  
+  # Bagging
+  phat_bag <- matrix(0, nrow(test), B)
+  
+  for (j in 1:B) {
+    set.seed(j + 1)
+    ind2 <- sample(nrow(train), nrow(train), replace = TRUE)
+    train2 <- train[ind2, ]
+    
+    fit <- rpart(survived ~ ., data = train2, method = "class")
+    phat_bag[,j] <- predict(fit, test, type = "prob")[,2]
+  }
+  
+  yhat_bag <- apply(phat_bag, 1, mean)
+  BAGGINGAUC[i] <- performance(prediction(yhat_bag, test$survived), "auc")@y.values[[1]]
+  
+  model_lpm <- glm(survived ~ ., data = train, family = binomial())
+  yhat_lpm <- predict(model_lpm, test, type = "response")
+  LPMAUC[i] <- performance(prediction(yhat_lpm, test$survived), "auc")@y.values[[1]]
+}
+
+LPMAUC
+
+
+# Calculate the mean AUC and standard deviation for each model
+mean_CARTAUC <- mean(CARTAUC)
+sd_CARTAUC <- sd(CARTAUC)
+
+mean_BAGGINGAUC <- mean(BAGGINGAUC)
+sd_BAGGINGAUC <- sd(BAGGINGAUC)
+
+mean_LPMAUC <- mean(LPMAUC)
+sd_LPMAUC <- sd(LPMAUC)
+
+```
+
+
+```{r}
+# Print the results
+cat("Mean and SD of AUC for CART: ", mean_CARTAUC, sd_CARTAUC, "\n")
+cat("Mean and SD of AUC for Bagging: ", mean_BAGGINGAUC, sd_BAGGINGAUC, "\n")
+cat("Mean and SD of AUC for LPM: ", mean_LPMAUC, sd_LPMAUC, "\n")
+
+```
+
+```{r}
+models <- c("LPM", "CART", "Bagging")
+auc_mean<-c(mean_LPMAUC, mean_CARTAUC, mean_BAGGINGAUC)
+auc_sd<-c(sd_LPMAUC, sd_CARTAUC, sd_BAGGINGAUC)
+
+auc_sum<-data.frame(Model= models, AUC_Mean = auc_mean, AUC_SD = auc_sd )
+
+print(auc_sum)
+```
+
+
+```{r}
+barplot(auc_sum$AUC_Mean, names.arg = models, ylim = c(0, 1),
+        main = "AUC Comparison", xlab = "Model", ylab = "AUC",
+        col = c("blue", "red", "green"))
+```
+
+
